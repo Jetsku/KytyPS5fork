@@ -389,6 +389,19 @@ void TestTriggerEffectState() {
 	states_at(255, 0);
 	Check(state[0] == 7 && state[1] == 3, "vibration firing at full travel");
 
+	// Feedback from position 0 pushes only while the trigger is pressed (Astro's Playroom waits for it).
+	param.trigger_mask       = 2;
+	param.command[1]         = {};
+	param.command[1].mode    = 1;
+	param.command[1].data[0] = 0;
+	param.command[1].data[1] = 5;
+	Check(PadSetTriggerEffect(1, &param) == 0, "feedback request failed");
+	states_at(0, 0);
+	Check(state[1] == 1, "an untouched trigger with feedback from position 0 reported pushing");
+	states_at(0, 40);
+	Check(state[1] == 2, "a pressed trigger with feedback from position 0 reported no force");
+	states_at(255, 0);
+
 	// The intensity setting changes what the pad feels, not what the game reads.
 	CycleSetting(Setting::TriggerEffectIntensity);
 	GetTriggerEffectState(state);

@@ -347,11 +347,17 @@ enum TriggerState : int32_t {
 // game's effect and the trigger's travel: 0..255 maps to the effect's ten positions 0..9. Games
 // such as Astro Bot wait for the weapon or feedback state before acting on L2/R2; the state
 // stayed 0 before, so those actions never happened.
+// Travel below which a trigger counts as released (analog rest noise).
+constexpr int TRIGGER_PRESSED_MIN = 8;
+
 int32_t TriggerEffectState(const PadTriggerEffectCommand& command, int value) {
 	const int pos = std::clamp(value, 0, 255) * 10 / 256;
+	// A feedback trigger pushes against the finger only while it is pressed: an effect from
+	// position 0 on an untouched trigger is "no force" (Astro's Playroom waits for the change).
+	const bool pressed = value >= TRIGGER_PRESSED_MIN;
 	switch (command.mode) {
 		case 1: // feedback: resistance from position data[0], strength data[1]
-			return command.data[1] != 0 && pos >= command.data[0] ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
+			return pressed && command.data[1] != 0 && pos >= command.data[0] ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
 			                                                      : TRIGGER_STATE_FEEDBACK_NO_FORCE;
 		case 2: // weapon: resistance from data[0], released at data[1]
 			if (pos >= command.data[1]) {
@@ -364,10 +370,10 @@ int32_t TriggerEffectState(const PadTriggerEffectCommand& command, int value) {
 			           ? TRIGGER_STATE_VIBRATION_IS_FIRING
 			           : TRIGGER_STATE_VIBRATION_NOT_FIRING;
 		case 4: // multiple-position feedback: strength per position
-			return command.data[pos] != 0 ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
+			return pressed && command.data[pos] != 0 ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
 			                              : TRIGGER_STATE_FEEDBACK_NO_FORCE;
 		case 5: // slope feedback from position data[0]
-			return pos >= command.data[0] ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
+			return pressed && pos >= command.data[0] ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
 			                              : TRIGGER_STATE_FEEDBACK_NO_FORCE;
 		case 6: // multiple-position vibration: frequency data[0], amplitude per position
 			return command.data[0] != 0 && command.data[1 + pos] != 0
