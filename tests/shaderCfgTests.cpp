@@ -12750,6 +12750,17 @@ void TestNewShaderRecompilerExpPixelOutputs() {
         "compressed UNORM16 MRT export was incorrectly decoded as FP16");
   CheckSpirvBinaryValidates(unorm16_result.spirv);
 
+  ShaderPixelInputInfo snorm16_info;
+  snorm16_info.target_output_mode[0] = 6;
+  options.input_info.pixel = &snorm16_info;
+  auto snorm16_result = RecompileForTest(shader, options);
+  const auto snorm16_source = DisassembleSpirvBinary(snorm16_result.spirv);
+  Check(CountSourceOccurrences(snorm16_source, "UnpackSnorm2x16") == 2u,
+        "compressed SNORM16 MRT export did not unpack two normalized pairs");
+  Check(!SpirvContainsExtInst(snorm16_result.spirv, 62),
+        "compressed SNORM16 MRT export was incorrectly decoded as FP16");
+  CheckSpirvBinaryValidates(snorm16_result.spirv);
+
   const uint32_t partial_shader[] = {
       EncodeExp0(0x00, 0x7),
       EncodeExp1(0, 1, 2, 3),
