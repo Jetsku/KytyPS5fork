@@ -429,6 +429,18 @@ static void SetGraphicsDynamicParams(const CommandBuffer& buffer, vk::CommandBuf
 #endif
 }
 
+// Instances one mesh dispatch of `groups` workgroups per instance can carry. Instances go in
+// dispatch Y, so both the Y limit and the total workgroup limit apply. Zero when even one
+// instance does not fit.
+static uint32_t MeshInstancesPerDispatch(uint32_t groups,
+                                         const vk::PhysicalDeviceMeshShaderPropertiesEXT& limits) {
+	if (groups == 0 || groups > limits.maxMeshWorkGroupCount[0] ||
+	    groups > limits.maxMeshWorkGroupTotalCount) {
+		return 0;
+	}
+	return std::min(limits.maxMeshWorkGroupCount[1], limits.maxMeshWorkGroupTotalCount / groups);
+}
+
 static bool DrawHasValidVertexShader(const HW::Shader& sh_ctx) {
 
 	const auto& vs = sh_ctx.GetVs();
@@ -1038,6 +1050,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	    std::span {state.vertex_info.data(), state.programs.VertexStageCount()};
 	const bool mesh_active = state.vertex_info[0].stage.program->stage == ShaderType::Mesh;
 	uint32_t   mesh_groups = 0;
+	uint32_t   mesh_instances_per_dispatch = 0;
 	if (mesh_active) {
 		const auto& mesh = state.vertex_info[0].mesh;
 		EXIT_NOT_IMPLEMENTED(mesh.fast_launch && (draw.IsIndexed() || primitive_restart_enable));
@@ -1056,11 +1069,10 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 			return;
 		}
 		mesh_groups        = (primitives - 1u) / mesh.primitives_per_group + 1u;
-		const auto& limits = m_context.GetGraphics().mesh_shader_properties;
-		if (mesh_groups > limits.maxMeshWorkGroupCount[0] ||
-		    draw.instance_count > limits.maxMeshWorkGroupCount[1] ||
-		    static_cast<uint64_t>(mesh_groups) * draw.instance_count >
-		        limits.maxMeshWorkGroupTotalCount) {
+		// Instances beyond one dispatch are split into instance ranges when the draw is recorded.
+		mesh_instances_per_dispatch =
+		    MeshInstancesPerDispatch(mesh_groups, m_context.GetGraphics().mesh_shader_properties);
+		if (mesh_instances_per_dispatch == 0) {
 			EXIT("mesh draw exceeds host workgroup limits: %ux%u\n", mesh_groups,
 			     draw.instance_count);
 		}
@@ -1119,18 +1131,21 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x300u);
 	}
 	CommitBindings(buffer, vk::PipelineBindPoint::eGraphics, pipeline, stages);
+	std::array<uint32_t, ShaderRecompiler::IR::PushData::MeshDrawDwordCount> mesh_draw_data {};
+	const auto push_mesh_draw_data = [&]() {
+		vk_buffer.pushConstants(pipeline.pipeline_layout,
+		                        vk::ShaderStageFlagBits::eMeshEXT |
+		                            vk::ShaderStageFlagBits::eFragment,
+		                        0, sizeof(mesh_draw_data), mesh_draw_data.data());
+	};
 	if (mesh_active) {
-		const uint32_t draw_data[] {
+		mesh_draw_data = {
 		    draw.index_count,
 		    draw.IsIndexed() ? static_cast<uint32_t>(emit.vertex_offset) : emit.first_vertex,
 		    emit.first_instance, index_source.guest_element_size,
 		    static_cast<uint32_t>(index_source.address),
 		    static_cast<uint32_t>(index_source.address >> 32u)};
-		static_assert(std::size(draw_data) == ShaderRecompiler::IR::PushData::MeshDrawDwordCount);
-		vk_buffer.pushConstants(pipeline.pipeline_layout,
-		                        vk::ShaderStageFlagBits::eMeshEXT |
-		                            vk::ShaderStageFlagBits::eFragment,
-		                        0, sizeof(draw_data), draw_data);
+		push_mesh_draw_data();
 	} else {
 		CommitIndexBuffer(vk_buffer, index_binding);
 	}
@@ -1150,7 +1165,16 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x500u);
 	}
 	if (mesh_active) {
-		vk_buffer.drawMeshTasksEXT(mesh_groups, draw.instance_count, 1);
+		// The mesh shader's instance index is the pushed first instance plus WorkgroupId.y, so a
+		// draw with more instances than one dispatch can carry is recorded as instance ranges.
+		for (uint32_t base = 0; base < draw.instance_count; base += mesh_instances_per_dispatch) {
+			if (base != 0) {
+				mesh_draw_data[2] = emit.first_instance + base;
+				push_mesh_draw_data();
+			}
+			vk_buffer.drawMeshTasksEXT(
+			    mesh_groups, std::min(mesh_instances_per_dispatch, draw.instance_count - base), 1);
+		}
 	} else {
 		EmitDrawPrimitives(ucfg, vk_buffer, draw, emit);
 	}
