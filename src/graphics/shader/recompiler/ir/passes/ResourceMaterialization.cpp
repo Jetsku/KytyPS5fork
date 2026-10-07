@@ -1312,6 +1312,11 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 
 	auto& memory_info = program.memory_info;
 	const ImageRemap image_remap(specialization);
+	// Dead-code elimination can remove an image operation (an IMAGE_GET_LOD whose result is never
+	// read) before resource tracking. Its memory entry stays behind with the frontend's
+	// descriptor register as the resource and no tracked image, so only the entries a remaining
+	// image operation refers to are remapped.
+	std::vector<bool> image_memory_used(memory_info.size(), false);
 	for (auto* block: program.blocks) {
 		for (auto it = block->begin(); it != block->end(); ++it) {
 			auto& inst = *it;
@@ -1368,6 +1373,7 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 			}
 			const auto index = inst.Flags<MemoryFlags>().index;
 			EXIT_IF(index >= memory_info.size());
+			image_memory_used[index] = true;
 			auto& memory = memory_info[index];
 			EXIT_IF(memory.resource >= images.size());
 			const auto& image = images[memory.resource];
@@ -1398,8 +1404,10 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 			        inst.GetOpcode() != ValueOpcode::ImageSampleRaw);
 		}
 	}
-	for (auto& memory: memory_info) {
-		if (memory.kind == ResourceKind::Image && !memory.planning_only) {
+	for (size_t index = 0; index < memory_info.size(); index++) {
+		auto& memory = memory_info[index];
+		if (memory.kind == ResourceKind::Image && !memory.planning_only &&
+		    image_memory_used[index]) {
 			memory.resource = image_remap[memory.resource];
 		}
 	}
