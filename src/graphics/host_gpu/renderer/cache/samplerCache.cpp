@@ -150,6 +150,18 @@ vk::Sampler SamplerCache::GetSampler(const ShaderSamplerResource& r, bool intege
 		sampler_info.mipLodBias       = 0.0f;
 	}
 
+	// FILTER_MODE (S# bits 29..30): 0 blends the filter footprint, 1 and 2 return its minimum or
+	// maximum texel (depth pyramids, conservative downsampling). Vulkan reduction modes replace
+	// the weighted average the same way; they cannot be combined with depth comparison.
+	vk::SamplerReductionModeCreateInfo reduction {};
+	if (const auto filter_mode = r.FilterMode();
+	    (filter_mode == 1u || filter_mode == 2u) && m_graphics.sampler_filter_minmax_enabled &&
+	    sampler_info.compareEnable == VK_FALSE) {
+		reduction.reductionMode =
+		    filter_mode == 1u ? vk::SamplerReductionMode::eMin : vk::SamplerReductionMode::eMax;
+		sampler_info.pNext = &reduction;
+	}
+
 	vk::Sampler vk_sampler = nullptr;
 	const auto  result     = m_graphics.device.createSampler(&sampler_info, nullptr, &vk_sampler);
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess || vk_sampler == nullptr);
