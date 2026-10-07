@@ -1132,13 +1132,21 @@ void DefineGetBdaPointer(EmitterState& state) {
 	    address);
 	const auto page64        = Binary(state, spv::OpShiftRightLogical, type, packed,
 	                                  ConstantU32(state, BufferCache::CACHING_PAGEBITS));
-	const auto page          = Unary(state, spv::OpUConvert, TypeU32(state), page64);
+	// A packed address past the range the page table covers (a garbage pointer, a descriptor base
+	// with high bits set) is unmapped: it must not index the page table or the fault bitmap out
+	// of bounds, where the result depends on the driver's robustness behaviour.
+	const auto in_table      = Binary(state, spv::OpULessThan, TypeBool(state), page64,
+	                                  ConstantU64(state, BufferCache::CACHING_NUMPAGES));
+	const auto page          = Select(state, TypeU32(state), in_table,
+	                                  Unary(state, spv::OpUConvert, TypeU32(state), page64),
+	                                  ConstantU32(state, 0));
 	const auto entry_pointer = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state, 64),
 	                          entry_pointer, state.bda_pagetable_variable, ConstantU32(state, 0),
 	                          page);
-	const auto base = state.builder.AllocateId();
-	state.builder.AddFunction(spv::OpLoad, type, base, entry_pointer);
+	const auto loaded = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, type, loaded, entry_pointer);
+	const auto base = Select(state, type, in_table, loaded, ConstantU64(state, 0));
 	const auto missing = Binary(state, spv::OpIEqual, TypeBool(state), base, ConstantU64(state, 0));
 	const auto fault_label     = state.builder.AllocateId();
 	const auto available_label = state.builder.AllocateId();
@@ -1147,7 +1155,8 @@ void DefineGetBdaPointer(EmitterState& state) {
 	state.builder.AddFunction(spv::OpBranchConditional, missing, fault_label, available_label);
 
 	EmitLabel(state, fault_label);
-	RecordBdaFault(state, page);
+	EmitIfCondition(state, in_table, [&]() { RecordBdaFault(state, page); });
+	const auto fault_exit = state.current_label;
 	state.builder.AddFunction(spv::OpBranch, merge_label);
 
 	EmitLabel(state, available_label);
@@ -1158,7 +1167,7 @@ void DefineGetBdaPointer(EmitterState& state) {
 
 	EmitLabel(state, merge_label);
 	const auto result = state.builder.AllocateId();
-	state.builder.AddFunction(spv::OpPhi, type, result, ConstantU64(state, 0), fault_label,
+	state.builder.AddFunction(spv::OpPhi, type, result, ConstantU64(state, 0), fault_exit,
 	                          available, available_label);
 	state.builder.AddFunction(spv::OpReturnValue, result);
 	state.builder.AddFunction(spv::OpFunctionEnd);
