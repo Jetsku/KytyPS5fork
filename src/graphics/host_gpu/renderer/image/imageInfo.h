@@ -26,6 +26,7 @@ struct ImageMetadataInfo {
 	ImageMetadataKind   kind                 = ImageMetadataKind::None;
 	uint32_t            control              = 0;
 	uint32_t            clear_word           = 0;
+	uint32_t            clear_word1          = 0; // Texel bits 32..63 of 64-bit formats.
 	VideoOutCompression compression          = VideoOutCompression::Uncompressed;
 	bool                stencil_compressed   = false;
 	bool                clear_register_valid = false;
@@ -455,6 +456,60 @@ inline constexpr std::array<VideoOutFormatPolicy, 7> VIDEO_OUT_FORMAT_POLICIES {
 			next.float32[3] = static_cast<float>((packed >> 30u) & 0x3u) / 3.0f;
 			break;
 		default: return false;
+	}
+	clear = next;
+	return true;
+}
+
+// A register clear holds the texel bits of the target format: CB_COLORn_CLEAR_WORD0 the low 32
+// bits and, for 64-bit formats, CB_COLORn_CLEAR_WORD1 the high 32 bits. Narrower formats only use
+// the first word.
+[[nodiscard]] inline bool DecodePackedColorClear64(vk::Format format, uint32_t word0,
+                                                   uint32_t word1, vk::ClearColorValue& clear) {
+	vk::ClearColorValue           next {};
+	const std::array<uint32_t, 4> halves {word0 & 0xffffu, word0 >> 16u, word1 & 0xffffu,
+	                                      word1 >> 16u};
+	switch (format) {
+		case vk::Format::eR16G16B16A16Sfloat:
+		case vk::Format::eR16G16B16A16Unorm: {
+			const auto pair = format == vk::Format::eR16G16B16A16Sfloat ? vk::Format::eR16G16Sfloat
+			                                                            : vk::Format::eR16G16Unorm;
+			vk::ClearColorValue high {};
+			(void)DecodePackedColorClear(pair, word0, next);
+			(void)DecodePackedColorClear(pair, word1, high);
+			next.float32[2] = high.float32[0];
+			next.float32[3] = high.float32[1];
+			break;
+		}
+		case vk::Format::eR16G16B16A16Snorm:
+			for (uint32_t i = 0; i < 4; i++) {
+				next.float32[i] =
+				    std::max(static_cast<float>(static_cast<int16_t>(halves[i])) / 32767.0f, -1.0f);
+			}
+			break;
+		case vk::Format::eR16G16B16A16Uint:
+			for (uint32_t i = 0; i < 4; i++) {
+				next.uint32[i] = halves[i];
+			}
+			break;
+		case vk::Format::eR16G16B16A16Sint:
+			for (uint32_t i = 0; i < 4; i++) {
+				next.int32[i] = static_cast<int16_t>(halves[i]);
+			}
+			break;
+		case vk::Format::eR32G32Sfloat:
+			next.float32[0] = std::bit_cast<float>(word0);
+			next.float32[1] = std::bit_cast<float>(word1);
+			break;
+		case vk::Format::eR32G32Uint:
+			next.uint32[0] = word0;
+			next.uint32[1] = word1;
+			break;
+		case vk::Format::eR32G32Sint:
+			next.int32[0] = static_cast<int32_t>(word0);
+			next.int32[1] = static_cast<int32_t>(word1);
+			break;
+		default: return DecodePackedColorClear(format, word0, clear);
 	}
 	clear = next;
 	return true;

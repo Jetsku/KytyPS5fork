@@ -10201,6 +10201,43 @@ public:
                   DecodeColorDwordFill(format, 0x3c003c00u, clear),
               "alternating R16 pixels were treated as a uniform clear");
     }
+    struct Packed64Case {
+      vk::Format format;
+      uint32_t word0;
+      uint32_t word1;
+      std::array<uint32_t, 4> channels;
+    };
+    const auto bits = [](std::array<float, 4> channels) {
+      return std::bit_cast<std::array<uint32_t, 4>>(channels);
+    };
+    const std::array packed64_cases{
+        Packed64Case{vk::Format::eR16G16B16A16Sfloat, 0xbc003c00u, 0x3800b400u,
+                     bits({1.0f, -1.0f, -0.25f, 0.5f})},
+        Packed64Case{vk::Format::eR16G16B16A16Unorm, 0x8000ffffu, 0xffff0000u,
+                     bits({1.0f, 32768.0f / 65535.0f, 0.0f, 1.0f})},
+        Packed64Case{vk::Format::eR16G16B16A16Snorm, 0x80007fffu, 0xc0010000u,
+                     bits({1.0f, -1.0f, 0.0f, -16383.0f / 32767.0f})},
+        Packed64Case{vk::Format::eR16G16B16A16Uint, 0xfffe0001u, 0x12345678u,
+                     {0x0001u, 0xfffeu, 0x5678u, 0x1234u}},
+        Packed64Case{vk::Format::eR16G16B16A16Sint, 0x8000ffffu, 0x00017fffu,
+                     {0xffffffffu, 0xffff8000u, 0x00007fffu, 0x00000001u}},
+        Packed64Case{vk::Format::eR32G32Sfloat, 0x3f800000u, 0xc0000000u,
+                     bits({1.0f, -2.0f, 0.0f, 0.0f})},
+        Packed64Case{vk::Format::eR32G32Uint, 0xdeadbeefu, 0x01234567u,
+                     {0xdeadbeefu, 0x01234567u, 0, 0}},
+        Packed64Case{vk::Format::eR32G32Sint, 0xffffffffu, 0x80000000u,
+                     {0xffffffffu, 0x80000000u, 0, 0}},
+        // Formats up to 32 bits ignore the second word.
+        Packed64Case{vk::Format::eR16G16Sfloat, 0xbc003c00u, 0xffffffffu,
+                     bits({1.0f, -1.0f, 0.0f, 0.0f})},
+        Packed64Case{vk::Format::eR32Uint, 0x12345678u, 0xffffffffu, {0x12345678u, 0, 0, 0}},
+    };
+    for (const auto &test : packed64_cases) {
+      Require(name, "packed 64-bit clear",
+              DecodePackedColorClear64(test.format, test.word0, test.word1, clear) &&
+                  std::bit_cast<std::array<uint32_t, 4>>(clear.float32) == test.channels,
+              "64-bit clear lost the second register word, channel order or range");
+    }
     constexpr uintptr_t base = 0x0000000204100000ull;
     constexpr uint64_t allocation_size = 0x200000;
     constexpr uint64_t allocation_alignment = 0x10000;
@@ -10213,6 +10250,7 @@ public:
       Prospero::ChannelLayout layout = Prospero::ChannelLayout::k16_16_16_16;
       Prospero::ChannelType type = Prospero::ChannelType::kFloat;
       uint32_t clear_word = 0;
+      uint32_t clear_word1 = 0;
     };
     constexpr std::array cases{
         FillCase{0x40404040u, {0, 0x3c000000u}},
@@ -10230,6 +10268,9 @@ public:
         FillCase{.fill = 0x20202020u, .texel = {0x0000ffffu},
                  .layout = Prospero::ChannelLayout::k16_16,
                  .type = Prospero::ChannelType::kUNorm, .clear_word = 0x0000ffffu},
+        // Astro Bot's galaxy-map normal G-buffer: an RGBA16F register clear needs both words.
+        FillCase{.fill = 0x20202020u, .texel = {0xbc003c00u, 0x3800b400u},
+                 .clear_word = 0xbc003c00u, .clear_word1 = 0x3800b400u},
     };
     EnsureRuntimeContext();
     // Astro's generic metadata fill, through S_ENDPGM; trailing debug data is omitted.
@@ -10321,7 +10362,7 @@ public:
         registers.SetColorDccAddr(0, {.addr = dcc_address});
         registers.SetColorCmask(0, {.addr = dcc_address});
         registers.SetColorClearWord0(0, {.word0 = fill_case.cmask ? expected[0] : fill_case.clear_word});
-        registers.SetColorClearWord1(0, {.word1 = 0});
+        registers.SetColorClearWord1(0, {.word1 = fill_case.clear_word1});
         registers.SetRenderTargetMask(0x0f);
         scheduler.Begin(registers, user_config, shaders);
 
