@@ -53,6 +53,7 @@ struct PadData;
 struct PadVibrationParam;
 struct PadLightBarParam;
 struct PadTriggerEffectParam;
+struct PadTriggerEffectStateInformation;
 
 inline int controller_get_axis(int min, int max, int value) {
 	int v = (255 * (value - min)) / (max - min);
@@ -79,8 +80,6 @@ enum class Setting { SpeakerVolume, VibrationIntensity, TriggerEffectIntensity }
 
 void  CycleSetting(Setting setting);
 float GetSettingScale(Setting setting);
-// scePadGetTriggerEffectState: per trigger, the state of the game's effect at the trigger's travel.
-void GetTriggerEffectState(int32_t* state);
 
 int KYTY_SYSV_ABI PadInit();
 int KYTY_SYSV_ABI PadOpen(int user_id, int type, int index, const void* param);
@@ -94,8 +93,7 @@ int KYTY_SYSV_ABI PadReadState(int handle, PadData* data);
 int KYTY_SYSV_ABI PadRead(int handle, PadData* data, int num);
 int KYTY_SYSV_ABI PadSetVibration(int handle, const PadVibrationParam* param);
 int KYTY_SYSV_ABI PadSetTriggerEffect(int handle, const PadTriggerEffectParam* param);
-// state points to ScePadTriggerEffectState: int32_t state[2] (left, right).
-int KYTY_SYSV_ABI PadGetTriggerEffectState(int handle, int32_t* state);
+int KYTY_SYSV_ABI PadGetTriggerEffectState(int handle, PadTriggerEffectStateInformation* info);
 int KYTY_SYSV_ABI PadResetLightBar(int handle);
 int KYTY_SYSV_ABI PadSetLightBar(int handle, const PadLightBarParam* param);
 
