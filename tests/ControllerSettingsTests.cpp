@@ -417,6 +417,59 @@ void TestTriggerEffectState() {
 	CycleSetting(Setting::TriggerEffectIntensity);
 	GetTriggerEffectState(state);
 	Check(state[0] == 7, "muting trigger effects changed the reported state");
+
+	// Multiple-position feedback: strength per position; pushes where the current position has one.
+	param.trigger_mask    = 2;
+	param.command[1]      = {};
+	param.command[1].mode = 4;
+	// Position 0 has a strength, but an untouched trigger does not push.
+	param.command[1].data[0] = 2;
+	param.command[1].data[3] = 3;
+	param.command[1].data[7] = 5;
+	Check(PadSetTriggerEffect(1, &param) == 0, "multiple-position feedback request failed");
+	states_at(255, 0);
+	Check(state[1] == 1, "an untouched trigger with multiple-position feedback reported pushing");
+	states_at(255, 52); // position 2
+	Check(state[1] == 1, "multiple-position feedback pushed at a position without strength");
+	states_at(255, 77); // position 3
+	Check(state[1] == 2, "multiple-position feedback did not push at a position with strength");
+	states_at(255, 128); // position 5
+	Check(state[1] == 1, "multiple-position feedback pushed between its zones");
+	states_at(255, 180); // position 7
+	Check(state[1] == 2, "multiple-position feedback did not push in its second zone");
+
+	// Slope feedback: pushes from its start position data[0].
+	param.command[1]         = {};
+	param.command[1].mode    = 5;
+	param.command[1].data[0] = 4;
+	param.command[1].data[1] = 8;
+	param.command[1].data[2] = 2;
+	param.command[1].data[3] = 6;
+	Check(PadSetTriggerEffect(1, &param) == 0, "slope feedback request failed");
+	states_at(255, 77); // position 3
+	Check(state[1] == 1, "slope feedback pushed before its start position");
+	states_at(255, 103); // position 4
+	Check(state[1] == 2, "slope feedback did not push at its start position");
+	param.command[1].data[0] = 0;
+	Check(PadSetTriggerEffect(1, &param) == 0, "slope feedback request failed");
+	states_at(255, 0);
+	Check(state[1] == 1,
+	      "an untouched trigger with slope feedback from position 0 reported pushing");
+
+	// Multiple-position vibration: frequency data[0], amplitude per position from data[1].
+	param.command[1]             = {};
+	param.command[1].mode        = 6;
+	param.command[1].data[0]     = 20;
+	param.command[1].data[1 + 5] = 4;
+	Check(PadSetTriggerEffect(1, &param) == 0, "multiple-position vibration request failed");
+	states_at(255, 103); // position 4
+	Check(state[1] == 6, "multiple-position vibration fired at a position without amplitude");
+	states_at(255, 128); // position 5
+	Check(state[1] == 7, "multiple-position vibration did not fire at a position with amplitude");
+	param.command[1].data[0] = 0;
+	Check(PadSetTriggerEffect(1, &param) == 0, "multiple-position vibration request failed");
+	GetTriggerEffectState(state);
+	Check(state[1] == 6, "multiple-position vibration without a frequency reported firing");
 }
 } // namespace
 

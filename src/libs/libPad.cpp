@@ -30,8 +30,13 @@ static int KYTY_SYSV_ABI PadGetTriggerEffectState(int                           
                                                   PadTriggerEffectStateInformation* info) {
 	PRINT_NAME();
 
+	constexpr int pad_error_invalid_handle = -2137915389; /* 0x80920003 */
+
 	LOGF("\t handle = %d\n", handle);
 
+	if (handle != 1) {
+		return pad_error_invalid_handle;
+	}
 	if (info == nullptr) {
 		return -2137653243; /* 0x80960005 */
 	}
