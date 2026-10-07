@@ -350,6 +350,16 @@ void TestTriggerEffectState() {
 	int32_t    state[2] = {-1, -1};
 	GetTriggerEffectState(state);
 	Check(state[0] == 0 && state[1] == 0, "a trigger without an effect reported a state");
+	// libScePad's codes: the invalid handle comes first, as in the other pad calls.
+	Check(PadGetTriggerEffectState(2, state) == PAD_ERROR_INVALID_HANDLE,
+	      "trigger state accepted an invalid handle");
+	Check(PadGetTriggerEffectState(2, nullptr) == PAD_ERROR_INVALID_HANDLE,
+	      "trigger state checked the output before the handle");
+	Check(PadGetTriggerEffectState(1, nullptr) == PAD_ERROR_INVALID_ARG,
+	      "trigger state accepted a null output");
+	state[0] = state[1] = -1;
+	Check(PadGetTriggerEffectState(1, state) == OK && state[0] == 0 && state[1] == 0,
+	      "trigger state failed on the opened handle");
 
 	PadTriggerEffectParam param {};
 	param.trigger_mask       = 3;

@@ -1170,4 +1170,21 @@ int KYTY_SYSV_ABI PadSetTriggerEffect(int handle, const PadTriggerEffectParam* p
 	return g_controller->SetTriggerEffect(*param) ? OK : PAD_ERROR_INVALID_ARG;
 }
 
+int KYTY_SYSV_ABI PadGetTriggerEffectState(int handle, int32_t* state) {
+	PRINT_NAME();
+
+	LOGF("\t handle = %d\n", handle);
+
+	if (handle != 1) {
+		return PAD_ERROR_INVALID_HANDLE;
+	}
+	if (state == nullptr) {
+		return PAD_ERROR_INVALID_ARG;
+	}
+
+	GetTriggerEffectState(state);
+
+	return OK;
+}
+
 } // namespace Libs::Controller
