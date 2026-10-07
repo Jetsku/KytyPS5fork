@@ -115,6 +115,16 @@ DppTargetLane EmitDppTargetLane(EmitterState& state, const IR::DppMoveFlags& fla
 	if (control == 0x141u) {
 		return EmitDppMirrorTargetLane(state, subid, true);
 	}
+	if (control >= 0x150u && control <= 0x15fu) {
+		// DPP_ROW_SHARE: every lane reads lane (control & 15) of its row of 16.
+		const auto row    = state.builder.AllocateId();
+		const auto target = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpBitwiseAnd, TypeU32(state), row, subid,
+		                          ConstantU32(state, ~0xfu));
+		state.builder.AddFunction(spv::OpBitwiseOr, TypeU32(state), target, row,
+		                          ConstantU32(state, control & 0xfu));
+		return {target, ConstantBool(state, true)};
+	}
 	if (control >= 0x160u && control <= 0x16fu) {
 		const auto target = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpBitwiseXor, TypeU32(state), target, subid,
